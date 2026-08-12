@@ -2210,9 +2210,7 @@ export class AgentSession {
 		}
 
 		const lastMessage = this.agent.state.messages[this.agent.state.messages.length - 1];
-		// Preserve a true set above by a queued autonomous/goal continuation: the
-		// assistant-last heuristic means "task finished", which a queued
-		// continuation driver disproves.
+		// A queued continuation disproves the assistant-last "task finished" heuristic, so preserve a true set above.
 		this._continueAfterThresholdCompaction ||= lastMessage !== undefined && lastMessage.role !== "assistant";
 		return true;
 	}
@@ -2699,8 +2697,7 @@ export class AgentSession {
 			return false;
 		}
 
-		// Goal continuation takes exclusive priority over autonomous continuation,
-		// matching _getContinuationMessages.
+		// Goal continuation takes exclusive priority over autonomous continuation, matching _getContinuationMessages.
 		if (this._queueGoalContinuationForThresholdCompaction(context.message)) {
 			this._continueAfterThresholdCompaction = true;
 		} else if (await this._queueAutonomousContinuationForThresholdCompaction(context.message)) {
@@ -2767,15 +2764,8 @@ export class AgentSession {
 		return autonomousMessage;
 	}
 
-	/**
-	 * Goal counterpart of _queueAutonomousContinuationForThresholdCompaction. A
-	 * threshold stop at the end of an assistant text turn reads as "task
-	 * finished" to the role heuristic, so an active goal would stall: the loop
-	 * exits before the goal continuation poll, and agent.continue() cannot
-	 * resume from an assistant-last context. Queue the goal continuation as a
-	 * session input (counted like the idle-time poll counts it) so the regular
-	 * post-compaction resume machinery delivers it instead.
-	 */
+	// The role heuristic reads an assistant-last threshold stop as "task finished" and
+	// agent.continue() cannot resume from it, so the goal continuation is queued as a session input.
 	private _queueGoalContinuationForThresholdCompaction(message: AssistantMessage): boolean {
 		if (message.stopReason === "error" || message.stopReason === "aborted") {
 			return false;
@@ -2810,9 +2800,26 @@ export class AgentSession {
 			this._queuedGoalThresholdContinuation = goalMessage;
 			return true;
 		} catch {
-			// Goal continuation queueing must not interrupt compaction handling.
 			return false;
 		}
+	}
+
+	// Withdraws a goal continuation queued for a threshold compaction the user cancelled,
+	// rolling back the continuationsUsed increment so the next natural stop re-queues it.
+	private _clearQueuedGoalContinuationAfterCancelledThresholdCompaction(
+		queuedGoalContinuation: AgentMessage | undefined,
+	): void {
+		if (queuedGoalContinuation === undefined) return;
+		const cancelled = this._cancelSessionActions(
+			(action) => action.payload.kind === "turn" && primaryDeliveryRecord(action).message === queuedGoalContinuation,
+			new Error("Queued goal continuation was cleared before delivery."),
+		);
+		this._queuedGoalThresholdContinuation = undefined;
+		// A stale marker (continuation already consumed) matches no action; only an
+		// actual cancellation may roll back its queue-time continuationsUsed increment.
+		if (cancelled.length === 0) return;
+		this._setGoalState({ ...this._goalState, continuationsUsed: this._goalState.continuationsUsed - 1 });
+		this._emitQueueUpdate();
 	}
 
 	private _clearQueuedAutonomousContinuations(
@@ -8150,8 +8157,6 @@ export class AgentSession {
 		const contextTokens = this._getThresholdContextTokens(assistantMessage, compactionTimestamp);
 		if (contextTokens === undefined) return false;
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
-			// Goal continuation takes exclusive priority over autonomous continuation,
-			// matching _getContinuationMessages.
 			if (queueAutonomousContinuation && this._queueGoalContinuationForThresholdCompaction(assistantMessage)) {
 				this._continueAfterThresholdCompaction = true;
 			} else if (
@@ -8239,11 +8244,12 @@ export class AgentSession {
 			reason === "threshold" && shouldContinueAfterCompaction
 				? this._pendingThresholdCompactionAutonomousMessages.splice(0)
 				: [];
+		const queuedGoalContinuationForThisCompaction =
+			reason === "threshold" && shouldContinueAfterCompaction ? this._queuedGoalThresholdContinuation : undefined;
 		this._continueAfterThresholdCompaction = false;
 
-		// Requested and threshold compactions stop the loop on purpose; don't stall
-		// if the compaction itself fails or is skipped. Overflow stays excluded: a
-		// failed overflow recovery must not re-issue the overflowing request.
+		// Requested/threshold stop the loop on purpose, so a failed or skipped compaction must not stall it.
+		// Overflow stays excluded: a failed overflow recovery must not re-issue the overflowing request.
 		const resumeAfterFailure = () => {
 			if (
 				(reason === "requested" || reason === "threshold") &&
@@ -8322,6 +8328,7 @@ export class AgentSession {
 			const aborted =
 				errorMessage === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
 			if (aborted) {
+				this._clearQueuedGoalContinuationAfterCancelledThresholdCompaction(queuedGoalContinuationForThisCompaction);
 				this._endCompactionUnsuccessfully(
 					reason,
 					"cancelled",
