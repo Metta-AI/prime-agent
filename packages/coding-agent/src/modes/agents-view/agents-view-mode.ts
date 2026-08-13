@@ -819,7 +819,6 @@ export class AgentsViewMode implements Component, Focusable {
 			undefined,
 			{
 				topPadding: true,
-				getStartHint: () => "type to search sessions",
 				getExtraMetadata: () => {
 					const root = this.scopeRootSummary;
 					return [

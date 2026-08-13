@@ -440,14 +440,14 @@ export class BrandSplashHeader implements Component {
 		};
 		const extraMetadata = this.options.getExtraMetadata?.() ?? [];
 		const hideStartHint = this.options.getHideStartHint?.() ?? false;
-		const startHint = this.options.getStartHint?.();
+		const startHint = this.options.getStartHint?.() ?? "type to search sessions";
 		const metaLines = showMeta
 			? [
 					labelled("version", `v${this.version}`),
 					labelled("model", this.getModelId() ?? "—"),
 					labelled("cwd", formatSplashCwd(this.getCwd())),
 					...extraMetadata.map((line) => labelled(line.label, line.value)),
-					...(hideStartHint || startHint === undefined ? [] : ["", theme.fg("dim", startHint)]),
+					...(hideStartHint ? [] : ["", theme.fg("dim", startHint)]),
 				]
 			: [];
 		const metaStart = Math.max(0, Math.floor((this.logoRaw.length - metaLines.length) / 2));
