@@ -1082,18 +1082,23 @@ export class AgentDaemon {
 			return;
 		}
 		const parentPath = canonicalSessionPath(parentFile);
-		const edge = (await this.rlmSpawnLedger().edges()).find(
+		const edges = (await this.rlmSpawnLedger().edges(true)).filter(
 			(candidate) => candidate.childId === childId && canonicalSessionPath(candidate.parent) === parentPath,
 		);
+		const edge = edges.find((candidate) => !candidate.deleted);
 		let entry: PassiveRlmSubagentEntry | undefined;
 		if (edge) {
 			entry = await this.passiveRlmSubagentEntryForEdge(edge, {
 				sessionId: parentState.runtime.session.sessionId,
 				sessionFile: parentFile,
 			});
+		} else if (edges.length > 0) {
+			// Only a tombstoned edge: the topology tombstone is already durable
+			// (the display tombstone was written before it), nothing to re-append.
+			return;
 		} else {
-			// No live edge. A pre-ledger child the seed missed may still exist in
-			// the legacy registry; an unreadable registry means the durable
+			// No edge at all. A pre-ledger child the seed missed may still exist
+			// in the legacy registry; an unreadable registry means the durable
 			// deletion boundary cannot be established, so the deletion fails.
 			const legacy = (
 				await this.readLegacyRlmSubagentRegistry(
@@ -2464,8 +2469,10 @@ export class AgentDaemon {
 				);
 				const parentFile = parentState.runtime.session.sessionFile;
 				const parentPath = parentFile ? canonicalSessionPath(parentFile) : undefined;
+				// Tombstoned edges included: a retried delete must still resolve the
+				// child's path so its scheduled jobs get cancelled.
 				const persistedEdge = parentPath
-					? (await this.rlmSpawnLedger().edges()).find(
+					? (await this.rlmSpawnLedger().edges(true)).find(
 							(edge) => edge.childId === childId && canonicalSessionPath(edge.parent) === parentPath,
 						)
 					: undefined;
@@ -2478,7 +2485,18 @@ export class AgentDaemon {
 								sessionFile: parentFile,
 							})
 						: undefined;
-				const childSessionFile = persisted?.sessionFile ?? state?.runtime.session.sessionFile;
+				// Pre-ledger children have no edge at all (tombstoned or live): the
+				// legacy registry (including its tombstones) is the last path source.
+				const legacyFallback =
+					!persisted && !state && parentFile
+						? (
+								await this.readLegacyRlmSubagentRegistry(
+									this.legacyRlmSubagentRegistryPath(parentFile, parentState.runtime.session.sessionId),
+								)
+							).find((entry) => entry.childId === childId)
+						: undefined;
+				const childSessionFile =
+					persisted?.sessionFile ?? state?.runtime.session.sessionFile ?? legacyFallback?.sessionFile;
 				// Persist the deletion boundary before tearing down the runtime. As with a
 				// resident child, deletion keeps its transcript and artifact tree on disk.
 				await this.recordRlmSubagentDeletion(parentState, childId);

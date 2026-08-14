@@ -53,6 +53,7 @@ import {
 } from "../src/modes/daemon/daemon-protocol.js";
 import type { SessionSummary } from "../src/modes/daemon/daemon-session-list.js";
 import { DAEMON_WORKER_SUPERVISOR_SOCKET_ENV } from "../src/modes/daemon/daemon-worker-protocol.js";
+import { RlmSpawnLedger } from "../src/modes/daemon/rlm-ledger.js";
 
 describe("daemon mode helpers", () => {
 	it("preserves envelope client identity while registering prompt admission", () => {
@@ -7372,10 +7373,68 @@ describe("daemon mode helpers", () => {
 				.split(/\r?\n/)
 				.map((line) => JSON.parse(line) as { op: string; childId?: string });
 			expect(ledgerOps.at(-1)).toMatchObject({ op: "delete", childId: fixture.childId });
+
+			// A retried delete of the now-tombstoned child still resolves the
+			// session path and cancels its scheduled jobs.
+			const cronStore = (fixture.daemon as unknown as { cronStore: AgentCronJobStore }).cronStore;
+			const retryJob = cronStore.create({
+				activeSessionId: "gone",
+				sessionId: "gone",
+				sessionFile: fixture.childSessionFile,
+				cwd: tempDir,
+				scheduleText: "every 5m",
+				prompt: "left-behind heartbeat",
+			});
+			await (
+				fixture.daemon as unknown as { createSubagentRuntimeHost(parent: ActiveSessionState): SubagentRuntimeHost }
+			)
+				.createSubagentRuntimeHost(parentState)
+				.deleteRlmSubagentRuntime(fixture.childId);
+			expect(cronStore.list().find((candidate) => candidate.id === retryJob.id)?.status).toBe("cancelled");
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("cancels scheduled jobs when deleting a pre-ledger legacy child without hydrating it", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-legacy-delete-jobs-"));
+		try {
+			const fixture = makePersistedRlmDaemonFixture(tempDir);
+			const internals = fixture.daemon as unknown as {
+				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
+				createSubagentRuntimeHost(parent: ActiveSessionState): SubagentRuntimeHost;
+				rlmSpawnLedger(): { appendDelete(input: unknown): Promise<void>; edges(all?: boolean): Promise<unknown[]> };
+				cronStore: AgentCronJobStore;
+			};
+			const parentState = await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
+			// Simulate a pre-ledger child the seed missed: only the legacy
+			// registry knows it. Remove its seeded edge by deleting the ledger
+			// files entirely and pointing the daemon at a fresh (empty) ledger.
+			rmSync(join(tempDir, "rlm-ledger"), { recursive: true, force: true });
+			(fixture.daemon as unknown as { rlmSpawnLedgerInstance?: unknown }).rlmSpawnLedgerInstance =
+				new RlmSpawnLedger(tempDir, join(tempDir, "sessions"));
+			const job = internals.cronStore.create({
+				activeSessionId: "gone",
+				sessionId: "gone",
+				sessionFile: fixture.childSessionFile,
+				cwd: tempDir,
+				scheduleText: "every 5m",
+				prompt: "legacy heartbeat",
+			});
+
+			await internals.createSubagentRuntimeHost(parentState).deleteRlmSubagentRuntime(fixture.childId);
+
+			expect(internals.cronStore.list().find((candidate) => candidate.id === job.id)?.status).toBe("cancelled");
+			// The durable tombstone lands in the child's display file.
+			const display = JSON.parse(readFileSync(join(fixture.childSessionDir, "rlm-subagent.json"), "utf8")) as {
+				status: string;
+			};
+			expect(display).toMatchObject({ status: "deleted" });
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("gives RLM subagents messaging controllers for their own nested children", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-nested-controller-"));
 		try {

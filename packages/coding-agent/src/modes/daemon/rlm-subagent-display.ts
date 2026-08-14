@@ -14,7 +14,7 @@ import { join } from "node:path";
  * admission, completion, and deletion. Writes are atomic (temp file +
  * rename); reads are tolerant.
  */
-export const RLM_SUBAGENT_DISPLAY_FILE = "rlm-subagent.json";
+const RLM_SUBAGENT_DISPLAY_FILE = "rlm-subagent.json";
 
 export interface RlmSubagentDisplayEntry {
 	type: "rlm_subagent";
@@ -58,14 +58,15 @@ export function writeRlmSubagentDisplayEntry(entry: RlmSubagentDisplayEntry): vo
 	const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
 	const handle = openSync(tempPath, "wx", 0o600);
 	try {
-		writeSync(handle, `${JSON.stringify(entry)}\n`);
-		fsyncSync(handle);
-	} finally {
-		closeSync(handle);
-	}
-	try {
+		try {
+			writeSync(handle, `${JSON.stringify(entry)}\n`);
+			fsyncSync(handle);
+		} finally {
+			closeSync(handle);
+		}
 		renameSync(tempPath, path);
 	} catch (error) {
+		// A failed write, fsync, or rename must not leak the temp file.
 		rmSync(tempPath, { force: true });
 		throw error;
 	}

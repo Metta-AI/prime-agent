@@ -369,9 +369,14 @@ export class RlmSpawnLedger {
 		return this.queue.then(() => undefined);
 	}
 
-	/** Replay live (non-deleted) edges, without liveness reconciliation. */
-	edges(): Promise<RlmLedgerEdge[]> {
-		return this.enqueue(() => [...this.replaySync().values()].filter((edge) => !edge.deleted));
+	/**
+	 * Replay edges without liveness reconciliation. Deleted edges are filtered
+	 * by default; `includeDeleted` keeps the tombstones (marked with their
+	 * delete reason) for consumers that need a deleted child's identity, such
+	 * as cleanup retries.
+	 */
+	edges(includeDeleted = false): Promise<RlmLedgerEdge[]> {
+		return this.enqueue(() => [...this.replaySync().values()].filter((edge) => includeDeleted || !edge.deleted));
 	}
 
 	/**
