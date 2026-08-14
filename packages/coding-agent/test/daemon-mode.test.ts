@@ -1,5 +1,14 @@
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -7251,11 +7260,21 @@ describe("daemon mode helpers", () => {
 			expect(result.data).toEqual({ deleted: true });
 			expect(fixture.createRuntime).toHaveBeenCalledOnce();
 			expect(existsSync(fixture.childSessionFile)).toBe(true);
-			const persisted = readFileSync(join(fixture.parentArtifactDir, "rlm-subagents.jsonl"), "utf8")
+			// The tombstone is durable in the child's display file ("deleted
+			// deliberately, transcript retained") and in the ledger.
+			const display = JSON.parse(readFileSync(join(fixture.childSessionDir, "rlm-subagent.json"), "utf8")) as {
+				childId: string;
+				status: string;
+			};
+			expect(display).toMatchObject({ childId: fixture.childId, status: "deleted" });
+			const ledgerDir = join(tempDir, "rlm-ledger");
+			const ledgerFile = readdirSync(ledgerDir).find((name) => name.endsWith(".jsonl"));
+			if (!ledgerFile) throw new Error("Missing RLM ledger file");
+			const ledgerOps = readFileSync(join(ledgerDir, ledgerFile), "utf8")
 				.trim()
 				.split(/\r?\n/)
-				.map((line) => JSON.parse(line) as { childId: string; status: string });
-			expect(persisted.at(-1)).toMatchObject({ childId: fixture.childId, status: "deleted" });
+				.map((line) => JSON.parse(line) as { op: string; childId?: string });
+			expect(ledgerOps.at(-1)).toMatchObject({ op: "delete", childId: fixture.childId });
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
