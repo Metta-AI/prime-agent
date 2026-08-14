@@ -240,14 +240,11 @@ function getEditHeaderBg(
 	settledError: boolean | undefined,
 	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
 ): (text: string) => string {
-	if (preview) {
-		if ("error" in preview) {
-			return (text: string) => theme.bg("toolErrorBg", text);
-		}
-		return (text: string) => theme.bg("toolSuccessBg", text);
-	}
-	if (settledError) {
+	if (settledError || (preview && "error" in preview)) {
 		return (text: string) => theme.bg("toolErrorBg", text);
+	}
+	if (preview) {
+		return (text: string) => theme.bg("toolSuccessBg", text);
 	}
 	return (text: string) => theme.bg("toolPendingBg", text);
 }

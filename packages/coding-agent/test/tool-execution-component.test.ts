@@ -11,7 +11,7 @@ import { type BashOperations, createBashTool, createBashToolDefinition } from ".
 import { createEditToolDefinition } from "../src/core/tools/edit.js";
 import { createAgentConnectionToolDefinition } from "../src/modes/agent-connection/tool-definition.js";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
-import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../src/modes/interactive/theme/working-icon.js";
 
 function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
@@ -501,6 +501,12 @@ describe("ToolExecutionComponent parity", () => {
 			expect(rendered).not.toContain("+1 -1");
 			expect(rendered).not.toContain("-1 before");
 			expect(rendered).not.toContain("+1 after");
+
+			// The header must switch to the error background even though the
+			// async preview itself succeeded before execution failed.
+			const rawRendered = component.render(120).join("\n");
+			expect(rawRendered).toContain(theme.bg("toolErrorBg", "").slice(0, -"\x1b[49m".length));
+			expect(rawRendered).not.toContain(theme.bg("toolSuccessBg", "").slice(0, -"\x1b[49m".length));
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
