@@ -33,6 +33,7 @@ export interface IPythonCellState {
 	isError?: boolean;
 	expanded?: boolean;
 	agentMessagesExpanded?: boolean;
+	editDiffsExpanded?: boolean;
 	showExpandHint?: boolean;
 	executionStarted?: boolean;
 	argsComplete?: boolean;
@@ -383,7 +384,7 @@ export class IPythonCellComponent implements Component {
 		const lines = [truncateToWidth(` ${this.collapsedLine(details)}`, safeWidth, "")];
 
 		const hasCode = this.state.expanded ? this.renderCode(lines, safeWidth) : false;
-		if ((details.diffs?.length ?? 0) > 0 && this.state.expanded) {
+		if ((details.diffs?.length ?? 0) > 0 && (this.state.expanded || this.state.editDiffsExpanded)) {
 			this.renderDiffs(lines, safeWidth, details.diffs ?? [], this.marker(details));
 		}
 		if ((details.sentAgentMessages?.length ?? 0) > 0) {

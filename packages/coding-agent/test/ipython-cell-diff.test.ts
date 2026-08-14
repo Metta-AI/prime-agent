@@ -67,6 +67,36 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(out).toContain('await edit(path="sample.py", old_str="gamma", new_str="GAMMA")');
 	});
 
+	it("shows diffs on collapsed cells when edit diffs are expanded", () => {
+		const state = {
+			code: 'await edit(path="sample.py", old_str="gamma", new_str="GAMMA")\nprint("edit-done-marker")',
+			details: {
+				status: "ok",
+				durationMs: 12,
+				result: "'Edited sample.py'",
+				stdout: "unrelated stdout line",
+				diffs: [{ path: "sample.py", oldStr: "alpha\ngamma\ndelta", newStr: "alpha\nGAMMA\ndelta", startLine: 10 }],
+			},
+			executionStarted: true,
+			argsComplete: true,
+		};
+
+		const collapsedWithDiffs = renderCell({ ...state, expanded: false, editDiffsExpanded: true });
+		expect(collapsedWithDiffs).toMatch(/11 - .*gamma/);
+		expect(collapsedWithDiffs).toMatch(/11 \+ .*GAMMA/);
+		// The cell stays collapsed otherwise: no code body beyond the summary preview, no stdout.
+		expect(collapsedWithDiffs).not.toContain('print("edit-done-marker")');
+		expect(collapsedWithDiffs).not.toContain("unrelated stdout line");
+
+		const collapsed = renderCell({ ...state, expanded: false, editDiffsExpanded: false });
+		expect(collapsed).not.toMatch(/11 - .*gamma/);
+		expect(collapsed).not.toMatch(/11 \+ .*GAMMA/);
+
+		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: false });
+		expect(expanded).toMatch(/11 - .*gamma/);
+		expect(expanded).toContain('print("edit-done-marker")');
+	});
+
 	it("renders diff rows as full-width colored blocks", () => {
 		const width = 72;
 		const lines = new IPythonCellComponent({

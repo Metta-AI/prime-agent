@@ -428,6 +428,37 @@ describe("ToolExecutionComponent parity", () => {
 		expect(rendered.match(/\bedit\b/g)?.length ?? 0).toBe(1);
 	});
 
+	test("shows the built-in edit diff on collapsed tool calls when edit diffs are expanded", () => {
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-4e",
+			{ path: "README.md", oldText: "before", newText: "after" },
+			{},
+			createEditToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{ content: [], details: { diff: "-1 before\n+1 after", firstChangedLine: 1 }, isError: false },
+			false,
+		);
+
+		const collapsed = stripAnsi(component.render(120).join("\n"));
+		expect(collapsed).not.toContain("-1 before");
+		expect(collapsed).toContain("+1 -1");
+
+		component.setEditDiffsExpanded(true);
+		const withDiffs = stripAnsi(component.render(120).join("\n"));
+		expect(withDiffs).toContain("-1 before");
+		expect(withDiffs).toContain("+1 after");
+		expect(withDiffs).not.toContain("+1 -1");
+
+		component.setEditDiffsExpanded(false);
+		const collapsedAgain = stripAnsi(component.render(120).join("\n"));
+		expect(collapsedAgain).not.toContain("-1 before");
+		expect(collapsedAgain).toContain("+1 -1");
+	});
+
 	test("uses the generic result fallback for legacy-named custom tools", () => {
 		const overrideDefinition: ToolDefinition = {
 			...createBaseToolDefinition("bash"),

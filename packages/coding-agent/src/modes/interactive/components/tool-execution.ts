@@ -80,6 +80,7 @@ export class ToolExecutionComponent extends Container {
 	private args: any;
 	private expanded = false;
 	private agentMessagesExpanded = false;
+	private editDiffsExpanded = false;
 	private showExpandHint = true;
 	private showImages: boolean;
 	private includeImageDimensions: boolean;
@@ -175,6 +176,17 @@ export class ToolExecutionComponent extends Container {
 		return this.toolName === "ipython" && !this.toolDefinition?.renderCall && !this.toolDefinition?.renderResult;
 	}
 
+	private isBuiltInEditTool(): boolean {
+		return (
+			this.toolName === "edit" &&
+			(this.toolDefinition === undefined || this.toolDefinition.replayBuiltInToolName === "edit")
+		);
+	}
+
+	private effectiveExpanded(): boolean {
+		return this.expanded || (this.editDiffsExpanded && this.isBuiltInEditTool());
+	}
+
 	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
 		return {
 			args: this.args,
@@ -189,7 +201,7 @@ export class ToolExecutionComponent extends Container {
 			executionStarted: this.executionStarted,
 			argsComplete: this.argsComplete,
 			isPartial: this.isPartial,
-			expanded: this.expanded,
+			expanded: this.effectiveExpanded(),
 			showExpandHint: this.showExpandHint,
 			showImages: this.showImages,
 			includeImageDimensions: this.includeImageDimensions,
@@ -276,6 +288,14 @@ export class ToolExecutionComponent extends Container {
 		this.updateDisplay();
 	}
 
+	setEditDiffsExpanded(expanded: boolean): void {
+		if (this.editDiffsExpanded === expanded) {
+			return;
+		}
+		this.editDiffsExpanded = expanded;
+		this.updateDisplay();
+	}
+
 	setShowExpandHint(show: boolean): void {
 		if (this.showExpandHint === show) {
 			return;
@@ -341,6 +361,7 @@ export class ToolExecutionComponent extends Container {
 					isError: this.result?.isError ?? false,
 					expanded: this.expanded,
 					agentMessagesExpanded: this.agentMessagesExpanded,
+					editDiffsExpanded: this.editDiffsExpanded,
 					executionStarted: this.executionStarted,
 					argsComplete: this.argsComplete,
 					showExpandHint: this.showExpandHint,
@@ -398,10 +419,7 @@ export class ToolExecutionComponent extends Container {
 			}
 		}
 
-		const isBuiltInEdit =
-			this.toolName === "edit" &&
-			(this.toolDefinition === undefined || this.toolDefinition.replayBuiltInToolName === "edit");
-		if (!this.expanded && this.result && (isBuiltInEdit || this.shouldUseIpythonRenderer())) {
+		if (!this.effectiveExpanded() && this.result && (this.isBuiltInEditTool() || this.shouldUseIpythonRenderer())) {
 			const changes = getToolFileChanges(this.toolName, this.args, this.result, this.cwd);
 			if (changes.length > 0) {
 				const container = this.usesSelfRenderShell() ? this.selfRenderContainer : this.contentPanel;
