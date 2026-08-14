@@ -420,6 +420,23 @@ interface PassiveRlmSubagentEntry {
 	createdAt: number;
 }
 
+/** Spread-ready optional metadata fields shared by display files and legacy registry entries. */
+function rlmSubagentMetadataFields(source: {
+	rlmMaxDepth?: number;
+	rlmParentNodeId?: string;
+	prompt?: string;
+	spawnCode?: string;
+	model?: { provider: string; modelId: string };
+}): Pick<PassiveRlmSubagentEntry, "rlmMaxDepth" | "rlmParentNodeId" | "prompt" | "spawnCode" | "model"> {
+	return {
+		...(source.rlmMaxDepth !== undefined ? { rlmMaxDepth: source.rlmMaxDepth } : {}),
+		...(source.rlmParentNodeId ? { rlmParentNodeId: source.rlmParentNodeId } : {}),
+		...(source.prompt ? { prompt: source.prompt } : {}),
+		...(source.spawnCode ? { spawnCode: source.spawnCode } : {}),
+		...(source.model ? { model: source.model } : {}),
+	};
+}
+
 type PassiveRlmRoot =
 	| { rootParentState: ActiveSessionState; rootInfo?: never }
 	| { rootParentState?: never; rootInfo: SessionInfo };
@@ -1055,11 +1072,7 @@ export class AgentDaemon {
 				sessionName: input.sessionName,
 				sessionDir: input.sessionDir,
 				sessionFile: input.sessionFile,
-				rlmMaxDepth: input.rlmMaxDepth,
-				...(input.rlmParentNodeId ? { rlmParentNodeId: input.rlmParentNodeId } : {}),
-				...(input.prompt ? { prompt: input.prompt } : {}),
-				...(input.spawnCode ? { spawnCode: input.spawnCode } : {}),
-				...(input.model ? { model: input.model } : {}),
+				...rlmSubagentMetadataFields(input),
 				status: input.status,
 				createdAt: input.createdAt ?? Date.now(),
 				updatedAt: new Date().toISOString(),
@@ -1115,11 +1128,7 @@ export class AgentDaemon {
 				parentSessionId: parentState.runtime.session.sessionId,
 				parentSessionFile: parentFile,
 				...(legacy.rlmDepth !== undefined ? { rlmDepth: legacy.rlmDepth } : {}),
-				...(legacy.rlmMaxDepth !== undefined ? { rlmMaxDepth: legacy.rlmMaxDepth } : {}),
-				...(legacy.rlmParentNodeId ? { rlmParentNodeId: legacy.rlmParentNodeId } : {}),
-				...(legacy.prompt ? { prompt: legacy.prompt } : {}),
-				...(legacy.spawnCode ? { spawnCode: legacy.spawnCode } : {}),
-				...(legacy.model ? { model: legacy.model } : {}),
+				...rlmSubagentMetadataFields(legacy),
 				status: legacy.status,
 				createdAt: legacy.createdAt,
 			};
@@ -1136,11 +1145,7 @@ export class AgentDaemon {
 				sessionName: entry.sessionName,
 				sessionDir: entry.sessionDir,
 				sessionFile: entry.sessionFile,
-				...(entry.rlmMaxDepth !== undefined ? { rlmMaxDepth: entry.rlmMaxDepth } : {}),
-				...(entry.rlmParentNodeId ? { rlmParentNodeId: entry.rlmParentNodeId } : {}),
-				...(entry.prompt ? { prompt: entry.prompt } : {}),
-				...(entry.spawnCode ? { spawnCode: entry.spawnCode } : {}),
-				...(entry.model ? { model: entry.model } : {}),
+				...rlmSubagentMetadataFields(entry),
 				status: "deleted",
 				createdAt: entry.createdAt,
 				updatedAt: new Date().toISOString(),
@@ -1195,11 +1200,7 @@ export class AgentDaemon {
 			...(canonicalSessionPath(source.sessionFile) === edgeChild
 				? { sessionDir: source.sessionDir, sessionFile: source.sessionFile }
 				: {}),
-			...(source.rlmMaxDepth !== undefined ? { rlmMaxDepth: source.rlmMaxDepth } : {}),
-			...(source.rlmParentNodeId ? { rlmParentNodeId: source.rlmParentNodeId } : {}),
-			...(source.prompt ? { prompt: source.prompt } : {}),
-			...(source.spawnCode ? { spawnCode: source.spawnCode } : {}),
-			...(source.model ? { model: source.model } : {}),
+			...rlmSubagentMetadataFields(source),
 			status: source.status,
 			createdAt: source.createdAt,
 		});
