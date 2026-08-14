@@ -373,31 +373,6 @@ interface BoundSupervisorGenerationClaim {
 const RLM_SUBAGENT_REGISTRY_FILE = "rlm-subagents.jsonl";
 
 /**
- * Legacy per-parent `rlm-subagents.jsonl` entry shape, exactly as the daemon
- * wrote it before the spawn ledger became topology authority. Read-only:
- * registries are consumed only as the ledger seed source and as fallback
- * hydration metadata for pre-ledger children without a display file.
- */
-interface LegacyRlmSubagentRegistryEntry {
-	type: "rlm_subagent";
-	childId: string;
-	sessionName: string;
-	sessionDir: string;
-	sessionFile: string;
-	parentSessionId: string;
-	parentSessionFile?: string;
-	rlmDepth?: number;
-	rlmMaxDepth?: number;
-	rlmParentNodeId?: string;
-	prompt?: string;
-	spawnCode?: string;
-	model?: { provider: string; modelId: string };
-	status: "running" | "completed" | "deleted";
-	createdAt: number;
-	updatedAt: string;
-}
-
-/**
  * One passive child as the daemon presents it: topology (sessionFile, parent,
  * depth, name) from the spawn ledger; hydration metadata (prompt, spawnCode,
  * model, rlmMaxDepth, status, createdAt) from the per-child display file, or
@@ -418,6 +393,17 @@ interface PassiveRlmSubagentEntry {
 	model?: { provider: string; modelId: string };
 	status: "running" | "completed" | "deleted";
 	createdAt: number;
+}
+
+/**
+ * Legacy per-parent `rlm-subagents.jsonl` entry shape, exactly as the daemon
+ * wrote it before the spawn ledger became topology authority. Read-only:
+ * registries are consumed only as the ledger seed source and as fallback
+ * hydration metadata for pre-ledger children without a display file.
+ */
+interface LegacyRlmSubagentRegistryEntry extends PassiveRlmSubagentEntry {
+	type: "rlm_subagent";
+	updatedAt: string;
 }
 
 /** Spread-ready optional metadata fields shared by display files and legacy registry entries. */
