@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Container, resetCapabilitiesCache, setCapabilities, Text, TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { Type } from "typebox";
@@ -465,6 +468,42 @@ describe("ToolExecutionComponent parity", () => {
 		const collapsedAgain = stripAnsi(component.render(120).join("\n"));
 		expect(collapsedAgain).not.toContain("-1 before");
 		expect(collapsedAgain).toContain("+1 -1");
+	});
+
+	test("suppresses the built-in edit summary and diff when execution fails", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-edit-failed-"));
+		try {
+			const filePath = join(dir, "sample.txt");
+			await writeFile(filePath, "before\n", "utf8");
+			const component = new ToolExecutionComponent(
+				"edit",
+				"tool-4err",
+				{ path: filePath, edits: [{ oldText: "before", newText: "after" }] },
+				{},
+				createEditToolDefinition(dir),
+				createFakeTui(),
+				dir,
+			);
+			component.setEditDiffsExpanded(true);
+			const deadline = Date.now() + 2000;
+			while (Date.now() < deadline && !stripAnsi(component.render(120).join("\n")).includes("+1 -1")) {
+				component.setArgsComplete();
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			expect(stripAnsi(component.render(120).join("\n"))).toContain("+1 -1");
+
+			component.updateResult(
+				{ content: [{ type: "text", text: "Could not edit file: sample.txt." }], isError: true },
+				false,
+			);
+			const rendered = stripAnsi(component.render(120).join("\n"));
+			expect(rendered).not.toContain("╰─");
+			expect(rendered).not.toContain("+1 -1");
+			expect(rendered).not.toContain("-1 before");
+			expect(rendered).not.toContain("+1 after");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("built-in edit summary truncates a long path to one row and keeps counts and hint", () => {

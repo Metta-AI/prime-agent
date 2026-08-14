@@ -81,15 +81,15 @@ export function mergeTurnFileChanges(
 }
 
 /** Dim gutter that anchors every per-file change summary line. */
-export const FILE_CHANGE_SUMMARY_PREFIX = "    ╰─ ";
+const FILE_CHANGE_SUMMARY_PREFIX = "    ╰─ ";
 /** Indent that aligns diff rows with the summary line's text column. */
 export const FILE_CHANGE_DIFF_INDENT = " ".repeat(visibleWidth(FILE_CHANGE_SUMMARY_PREFIX));
 
-export function formatChangeCounts(change: Pick<FileChangeSummary, "added" | "removed">): string {
+function formatChangeCounts(change: Pick<FileChangeSummary, "added" | "removed">): string {
 	return `${theme.fg("toolDiffAdded", `+${change.added}`)} ${theme.fg("toolDiffRemoved", `-${change.removed}`)}`;
 }
 
-export function formatFileChangePath(path: string, cwd: string): string {
+function formatFileChangePath(path: string, cwd: string): string {
 	const resolvedPath = resolveToCwd(path, cwd);
 	const lexicalPath = formatPathRelativeToCwdOrAbsolute(resolvedPath, cwd);
 	if (!isAbsolute(lexicalPath)) return lexicalPath;
@@ -97,11 +97,12 @@ export function formatFileChangePath(path: string, cwd: string): string {
 }
 
 /**
- * One `    ╰─ <path> +N -M` row, truncated to width; the hint renders only when
- * diffsExpanded is defined.
+ * One `    ╰─ <path> +N -M` row, truncated to width; the path renders relative
+ * to cwd where possible and the hint renders only when diffsExpanded is defined.
  */
 export function formatFileChangeSummaryLine(
-	displayPath: string,
+	rawPath: string,
+	cwd: string | undefined,
 	change: Pick<FileChangeSummary, "added" | "removed">,
 	diffsExpanded: boolean | undefined,
 	width: number,
@@ -114,6 +115,7 @@ export function formatFileChangeSummaryLine(
 	const suffix = `${theme.fg("dim", " ")}${formatChangeCounts(change)}${hint}`;
 	const safeWidth = Math.max(1, width);
 	const available = Math.max(1, safeWidth - visibleWidth(prefix) - visibleWidth(suffix));
+	const displayPath = cwd === undefined ? rawPath : formatFileChangePath(rawPath, cwd);
 	const path = truncateToWidth(displayPath, available, "…");
 	return truncateToWidth(`${prefix}${theme.fg("muted", path)}${suffix}`, safeWidth, "");
 }

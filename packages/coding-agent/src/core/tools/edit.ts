@@ -7,7 +7,6 @@ import { renderDiff } from "../../modes/interactive/components/diff.js";
 import {
 	countChangedLines,
 	FILE_CHANGE_DIFF_INDENT,
-	formatFileChangePath,
 	formatFileChangeSummaryLine,
 } from "../../modes/interactive/components/edit-summary.js";
 import type { ToolDefinition } from "../extensions/types.js";
@@ -257,7 +256,8 @@ function getEditHeaderBg(
 // summary truncates to one row and wrapped diff lines keep the indent column.
 class EditChangeSummaryComponent implements Component {
 	constructor(
-		private readonly displayPath: string,
+		private readonly rawPath: string,
+		private readonly cwd: string,
 		private readonly change: { added: number; removed: number },
 		private readonly diffsExpanded: boolean | undefined,
 		private readonly diffLines: readonly string[] | undefined,
@@ -265,7 +265,7 @@ class EditChangeSummaryComponent implements Component {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
-		const lines = [formatFileChangeSummaryLine(this.displayPath, this.change, this.diffsExpanded, safeWidth)];
+		const lines = [formatFileChangeSummaryLine(this.rawPath, this.cwd, this.change, this.diffsExpanded, safeWidth)];
 		if (this.diffLines !== undefined) {
 			const indent = FILE_CHANGE_DIFF_INDENT.slice(0, Math.max(0, safeWidth - 1));
 			const contentWidth = Math.max(1, safeWidth - indent.length);
@@ -298,19 +298,20 @@ function buildEditCallComponent(
 		component.addChild(new Text(theme.fg("error", component.preview.error), 0, 0));
 		return component;
 	}
-	if (!component.preview) {
+	// A failed execution must not present the predicted diff as applied changes.
+	if (!component.preview || component.settledError) {
 		return component;
 	}
 
 	// The `╰─ <path> +N -M` summary line renders in both states; ctrl+j only
 	// attaches or removes the indented diff lines underneath it.
 	const rawPath = str(args?.file_path ?? args?.path);
-	const displayPath = rawPath !== null ? formatFileChangePath(rawPath, cwd) : "...";
 	const change = countChangedLines(component.preview.diff);
 	component.addChild(new Spacer(1));
 	component.addChild(
 		new EditChangeSummaryComponent(
-			displayPath,
+			rawPath ?? "...",
+			cwd,
 			change,
 			showExpandHint ? expanded : undefined,
 			expanded ? renderDiff(component.preview.diff).split("\n") : undefined,

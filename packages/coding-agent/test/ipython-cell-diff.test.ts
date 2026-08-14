@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { renderRichDiff } from "../src/modes/interactive/components/diff.js";
@@ -172,6 +175,33 @@ describe("IPythonCellComponent diff rendering", () => {
 			editDiffsExpanded: true,
 		});
 		expect(outside).toContain("/etc/hosts");
+	});
+
+	it("formats the summary path like the built-in edit tool, resolving symlinked cwds", () => {
+		const root = mkdtempSync(join(tmpdir(), "ipython-cell-diff-symlink-"));
+		try {
+			const realCwd = join(root, "real");
+			const linkedCwd = join(root, "linked");
+			mkdirSync(realCwd);
+			writeFileSync(join(realCwd, "same.ts"), "x");
+			symlinkSync(realCwd, linkedCwd, "dir");
+			const out = renderCell({
+				code: "await edit(...)",
+				cwd: linkedCwd,
+				details: {
+					status: "ok",
+					diffs: [{ path: join(realpathSync(realCwd), "same.ts"), oldStr: "x", newStr: "X", startLine: 1 }],
+				},
+				executionStarted: true,
+				argsComplete: true,
+				expanded: false,
+				editDiffsExpanded: false,
+			});
+			// Same cwd-relative output the built-in edit tool's formatFileChangePath gives.
+			expect(out).toContain("╰─ same.ts +1 -1");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("wraps a long diff line across rows without truncating or overflowing the width", () => {

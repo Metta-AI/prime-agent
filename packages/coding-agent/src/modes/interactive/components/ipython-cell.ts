@@ -1,4 +1,3 @@
-import { isAbsolute, relative } from "node:path";
 import {
 	type Component,
 	truncateToWidth,
@@ -10,7 +9,6 @@ import { formatAgentMessageParticipant } from "../../../core/agent-messages.js";
 import { previewIpythonCode } from "../../../core/tools/code-preview.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
 import { parseIpythonBashCell } from "../../../core/tools/ipython-cell-code.js";
-import { shortenPath } from "../../../core/tools/render-utils.js";
 import { getLanguageFromPath, highlightCode, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../theme/working-icon.js";
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";
@@ -284,18 +282,6 @@ function formatDuration(durationMs: number | undefined): string | undefined {
 		return `${Math.round(durationMs)}ms`;
 	}
 	return `${(durationMs / 1000).toFixed(1)}s`;
-}
-
-// Relative to the session cwd when nested under it, else the absolute path.
-function displayEditPath(path: string, cwd: string | undefined): string {
-	if (cwd && isAbsolute(path)) {
-		const rel = relative(cwd, path);
-		if (rel && !rel.startsWith("..") && !isAbsolute(rel)) {
-			return rel;
-		}
-		return shortenPath(path);
-	}
-	return path;
 }
 
 function isImageBlock(block: IPythonCellContentBlock): boolean {
@@ -717,9 +703,8 @@ export class IPythonCellComponent implements Component {
 			}
 		});
 
-		const displayPath = displayEditPath(path, this.state.cwd);
 		const hint = showHint && this.state.showExpandHint !== false ? this.state.editDiffsExpanded === true : undefined;
-		lines.push(formatFileChangeSummaryLine(displayPath, { added, removed }, hint, width));
+		lines.push(formatFileChangeSummaryLine(path, this.state.cwd, { added, removed }, hint, width));
 
 		for (const row of rows) {
 			lines.push(row);
