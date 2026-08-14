@@ -9,7 +9,6 @@ import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/rend
 import type { AgentConnectionToolDefinition } from "../../agent-connection/index.js";
 import { type Theme, theme } from "../theme/theme.js";
 import { getWorkingPulseFrame, workingIconFrame } from "../theme/working-icon.js";
-import { FileChangeSummaryComponent, getToolFileChanges } from "./edit-summary.js";
 import { getIpythonCodeFromArgs, IPythonCellComponent } from "./ipython-cell.js";
 import { ToolPanel } from "./tool-panel.js";
 
@@ -412,21 +411,6 @@ export class ToolExecutionComponent extends Container {
 				);
 				this.imageComponents.push(imageComponent);
 				this.addChild(imageComponent);
-			}
-		}
-
-		if (!this.editDiffsExpanded && this.result && (this.isBuiltInEditTool() || this.shouldUseIpythonRenderer())) {
-			const changes = getToolFileChanges(this.toolName, this.args, this.result, this.cwd);
-			if (changes.length > 0) {
-				const container = this.usesSelfRenderShell() ? this.selfRenderContainer : this.contentPanel;
-				container.addChild(
-					new FileChangeSummaryComponent(
-						changes,
-						this.cwd,
-						this.showExpandHint ? this.editDiffsExpanded : undefined,
-					),
-				);
-				hasContent = true;
 			}
 		}
 

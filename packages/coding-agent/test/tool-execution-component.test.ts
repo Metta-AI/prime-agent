@@ -446,19 +446,85 @@ describe("ToolExecutionComponent parity", () => {
 		const collapsed = stripAnsi(component.render(120).join("\n"));
 		expect(collapsed).not.toContain("-1 before");
 		expect(collapsed).toContain("+1 -1");
-		// The collapsed `╰─ path +N -M` summary line carries the ctrl+j hint.
+		// The `╰─ path +N -M` summary line carries the ctrl+j hint.
 		expect(collapsed.split("\n").find((line) => line.includes("╰─"))).toContain("to expand");
 
 		component.setEditDiffsExpanded(true);
-		const withDiffs = stripAnsi(component.render(120).join("\n"));
-		expect(withDiffs).toContain("-1 before");
-		expect(withDiffs).toContain("+1 after");
-		expect(withDiffs).not.toContain("+1 -1");
+		const withDiffLines = stripAnsi(component.render(120).join("\n")).split("\n");
+		// The summary line stays put; the diff renders under it, indented to its text column.
+		const summaryIndex = withDiffLines.findIndex((line) => line.includes("╰─ README.md +1 -1"));
+		expect(summaryIndex).toBeGreaterThanOrEqual(0);
+		expect(withDiffLines[summaryIndex]).toContain("to collapse");
+		const textColumn = withDiffLines[summaryIndex].indexOf("README.md");
+		const removed = withDiffLines.find((line) => line.includes("-1 before"));
+		const added = withDiffLines.find((line) => line.includes("+1 after"));
+		expect(removed?.startsWith(" ".repeat(textColumn))).toBe(true);
+		expect(added?.startsWith(" ".repeat(textColumn))).toBe(true);
 
 		component.setEditDiffsExpanded(false);
 		const collapsedAgain = stripAnsi(component.render(120).join("\n"));
 		expect(collapsedAgain).not.toContain("-1 before");
 		expect(collapsedAgain).toContain("+1 -1");
+	});
+
+	test("built-in edit summary truncates a long path to one row and keeps counts and hint", () => {
+		const longPath = "deeply/nested/directory/structure/with/a/really/long/file-name-that-overflows.md";
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-4f",
+			{ path: longPath, oldText: "before", newText: "after" },
+			{},
+			createEditToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult(
+			{ content: [], details: { diff: "-1 before\n+1 after", firstChangedLine: 1 }, isError: false },
+			false,
+		);
+		const lines = stripAnsi(component.render(40).join("\n")).split("\n");
+		const summaryLines = lines.filter((line) => line.includes("╰─"));
+		expect(summaryLines.length).toBe(1);
+		expect(summaryLines[0]).toContain("…");
+		expect(summaryLines[0]).toContain("+1 -1");
+		expect(summaryLines[0]).toContain("to expand");
+		for (const line of lines) {
+			expect(line.length).toBeLessThanOrEqual(40);
+		}
+	});
+
+	test("built-in edit diff rows keep the summary text column when a diff line wraps", () => {
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-4g",
+			{ path: "README.md", oldText: "before", newText: "after" },
+			{},
+			createEditToolDefinition(process.cwd()),
+			createFakeTui(),
+			process.cwd(),
+		);
+		const longLine =
+			"alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau";
+		component.updateResult(
+			{ content: [], details: { diff: `+1 ${longLine}`, firstChangedLine: 1 }, isError: false },
+			false,
+		);
+		component.setEditDiffsExpanded(true);
+		const lines = stripAnsi(component.render(60).join("\n")).split("\n");
+		const summaryIndex = lines.findIndex((line) => line.includes("╰─ README.md"));
+		expect(summaryIndex).toBeGreaterThanOrEqual(0);
+		const textColumn = lines[summaryIndex].indexOf("README.md");
+		const diffRows: string[] = [];
+		for (let i = summaryIndex + 1; i < lines.length && lines[i].trim() !== ""; i++) {
+			diffRows.push(lines[i]);
+		}
+		// The single logical diff line wraps; every continuation row stays anchored at the text column.
+		expect(diffRows.length).toBeGreaterThan(1);
+		for (const row of diffRows) {
+			expect(row.startsWith(" ".repeat(textColumn))).toBe(true);
+			expect(row[textColumn]).not.toBe(" ");
+		}
+		expect(diffRows.join(" ")).toContain("tau");
 	});
 
 	test("uses the generic result fallback for legacy-named custom tools", () => {
@@ -738,8 +804,11 @@ describe("ToolExecutionComponent parity", () => {
 		const withDiffs = stripAnsi(component.render(120).join("\n"));
 		const withDiffLines = withDiffs.split("\n");
 		expect(withDiffLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
-			withDiffLines.findIndex((line) => /✓ README\.md\s+\+1 -1/.test(line)),
+			withDiffLines.findIndex((line) => line.includes("╰─ README.md +1 -1")),
 		);
-		expect(withDiffs).not.toContain("╰─ README.md +1 -1");
+		// Exactly one summary line — the cell owns the block; no extra component doubles it.
+		expect(withDiffLines.filter((line) => line.includes("╰─ README.md +1 -1")).length).toBe(1);
+		expect(withDiffs).toMatch(/1 - before/);
+		expect(withDiffs).toMatch(/1 \+ after/);
 	});
 });

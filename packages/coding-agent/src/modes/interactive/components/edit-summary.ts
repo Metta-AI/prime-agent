@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { EditToolDetails } from "../../../core/tools/edit.js";
 import { generateDiffString } from "../../../core/tools/edit-diff.js";
 import type { IpythonToolDetails } from "../../../core/tools/ipython.js";
@@ -16,7 +16,7 @@ export interface FileChangeSummary {
 	removed: number;
 }
 
-function countChangedLines(diff: string): { added: number; removed: number } {
+export function countChangedLines(diff: string): { added: number; removed: number } {
 	let added = 0;
 	let removed = 0;
 	for (const line of diff.split("\n")) {
@@ -80,40 +80,42 @@ export function mergeTurnFileChanges(
 	}
 }
 
-function counts(change: Pick<FileChangeSummary, "added" | "removed">): string {
+/** Dim gutter that anchors every per-file change summary line. */
+export const FILE_CHANGE_SUMMARY_PREFIX = "    ╰─ ";
+/** Indent that aligns diff rows with the summary line's text column. */
+export const FILE_CHANGE_DIFF_INDENT = " ".repeat(visibleWidth(FILE_CHANGE_SUMMARY_PREFIX));
+
+export function formatChangeCounts(change: Pick<FileChangeSummary, "added" | "removed">): string {
 	return `${theme.fg("toolDiffAdded", `+${change.added}`)} ${theme.fg("toolDiffRemoved", `-${change.removed}`)}`;
 }
 
-function formatFileChangePath(path: string, cwd: string): string {
+export function formatFileChangePath(path: string, cwd: string): string {
 	const resolvedPath = resolveToCwd(path, cwd);
 	const lexicalPath = formatPathRelativeToCwdOrAbsolute(resolvedPath, cwd);
 	if (!isAbsolute(lexicalPath)) return lexicalPath;
 	return formatPathRelativeToCwdOrAbsolute(canonicalizePath(resolvedPath), canonicalizePath(cwd));
 }
 
-export class FileChangeSummaryComponent implements Component {
-	constructor(
-		private readonly changes: readonly FileChangeSummary[],
-		private readonly cwd: string,
-		private readonly diffsExpanded?: boolean,
-	) {}
-
-	render(width: number): string[] {
-		const safeWidth = Math.max(1, width);
-		const prefix = theme.fg("dim", "    ╰─ ");
-		const hint =
-			this.diffsExpanded === undefined
-				? ""
-				: `${theme.fg("dim", " · ")}${expandCollapseHint("app.edits.expand", this.diffsExpanded)}`;
-		return this.changes.map((change, index) => {
-			const suffix = `${theme.fg("dim", " ")}${counts(change)}${index === this.changes.length - 1 ? hint : ""}`;
-			const available = Math.max(1, safeWidth - visibleWidth(prefix) - visibleWidth(suffix));
-			const path = truncateToWidth(formatFileChangePath(change.path, this.cwd), available, "…");
-			return truncateToWidth(`${prefix}${theme.fg("muted", path)}${suffix}`, safeWidth, "");
-		});
-	}
-
-	invalidate(): void {}
+/**
+ * One `    ╰─ <path> +N -M` row, truncated to width; the hint renders only when
+ * diffsExpanded is defined.
+ */
+export function formatFileChangeSummaryLine(
+	displayPath: string,
+	change: Pick<FileChangeSummary, "added" | "removed">,
+	diffsExpanded: boolean | undefined,
+	width: number,
+): string {
+	const prefix = theme.fg("dim", FILE_CHANGE_SUMMARY_PREFIX);
+	const hint =
+		diffsExpanded === undefined
+			? ""
+			: `${theme.fg("dim", " · ")}${expandCollapseHint("app.edits.expand", diffsExpanded)}`;
+	const suffix = `${theme.fg("dim", " ")}${formatChangeCounts(change)}${hint}`;
+	const safeWidth = Math.max(1, width);
+	const available = Math.max(1, safeWidth - visibleWidth(prefix) - visibleWidth(suffix));
+	const path = truncateToWidth(displayPath, available, "…");
+	return truncateToWidth(`${prefix}${theme.fg("muted", path)}${suffix}`, safeWidth, "");
 }
 
 export function formatTotalChangeSummary(changes: readonly FileChangeSummary[]): string {
@@ -122,5 +124,5 @@ export function formatTotalChangeSummary(changes: readonly FileChangeSummary[]):
 		{ added: 0, removed: 0 },
 	);
 	const files = `${changes.length} file${changes.length === 1 ? "" : "s"} changed`;
-	return `${theme.fg("muted", files)}${theme.fg("dim", " | ")}${counts(totals)}`;
+	return `${theme.fg("muted", files)}${theme.fg("dim", " | ")}${formatChangeCounts(totals)}`;
 }

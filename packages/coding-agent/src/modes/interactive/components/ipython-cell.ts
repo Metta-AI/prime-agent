@@ -16,6 +16,7 @@ import { getWorkingPulseFrame, WORKING_ICON_FRAMES, workingIconFrame } from "../
 import { agentMessageBodyLines, agentMessagePreview, agentMessageSummaryLine } from "./agent-message.js";
 import { normalizeErrorDetails, summarizeErrorDetails } from "./collapsible-error.js";
 import { renderDiffSeparator, renderRichDiff } from "./diff.js";
+import { FILE_CHANGE_DIFF_INDENT, formatFileChangeSummaryLine } from "./edit-summary.js";
 import { expandCollapseHint } from "./keybinding-hints.js";
 
 export interface IPythonCellContentBlock {
@@ -384,8 +385,8 @@ export class IPythonCellComponent implements Component {
 		const lines = [truncateToWidth(` ${this.collapsedLine(details)}`, safeWidth, "")];
 
 		const hasCode = this.state.expanded ? this.renderCode(lines, safeWidth) : false;
-		if ((details.diffs?.length ?? 0) > 0 && this.state.editDiffsExpanded) {
-			this.renderDiffs(lines, safeWidth, details.diffs ?? [], this.marker(details));
+		if ((details.diffs?.length ?? 0) > 0) {
+			this.renderDiffs(lines, safeWidth, details.diffs ?? [], hasCode);
 		}
 		if ((details.sentAgentMessages?.length ?? 0) > 0) {
 			this.renderSentAgentMessages(lines, safeWidth, details.sentAgentMessages ?? []);
@@ -665,16 +666,22 @@ export class IPythonCellComponent implements Component {
 		}
 	}
 
-	private renderDiffs(lines: string[], width: number, diffs: readonly DiffDisplay[], marker: string): void {
+	// The `╰─ <path> +N -M` summary line renders in both states; ctrl+j only
+	// attaches or removes the indented diff rows underneath it.
+	private renderDiffs(lines: string[], width: number, diffs: readonly DiffDisplay[], hasCode: boolean): void {
 		const diffsByPath = new Map<string, DiffDisplay[]>();
 		for (const diff of diffs) {
 			const existing = diffsByPath.get(diff.path);
 			if (existing) existing.push(diff);
 			else diffsByPath.set(diff.path, [diff]);
 		}
-		for (const [path, edits] of diffsByPath) {
+		if (hasCode) {
 			this.addPlain(lines, "");
-			this.renderFileDiff(lines, width, path, edits, marker);
+		}
+		let index = 0;
+		for (const [path, edits] of diffsByPath) {
+			index += 1;
+			this.renderFileDiff(lines, width, path, edits, index === diffsByPath.size);
 		}
 	}
 
@@ -683,9 +690,12 @@ export class IPythonCellComponent implements Component {
 		width: number,
 		path: string,
 		edits: readonly DiffDisplay[],
-		marker: string,
+		showHint: boolean,
 	): void {
 		const language = getLanguageFromPath(path);
+		// Diff rows align with the summary line's text column (after the `╰─ ` gutter).
+		const indent = FILE_CHANGE_DIFF_INDENT.slice(0, Math.max(0, width - 1));
+		const contentWidth = Math.max(1, width - indent.length);
 		let added = 0;
 		let removed = 0;
 		const rows: string[] = [];
@@ -695,21 +705,21 @@ export class IPythonCellComponent implements Component {
 				if (row.startsWith("+")) added++;
 				else if (row.startsWith("-")) removed++;
 			}
+			if (!this.state.editDiffsExpanded) {
+				return;
+			}
 			if (index > 0) {
-				rows.push(renderDiffSeparator(width));
+				rows.push(`${indent}${renderDiffSeparator(contentWidth)}`);
 			}
 			// Append, not spread: a huge edit's diff can exceed the JS arg-count limit.
-			for (const row of renderRichDiff(diffText, width, { language })) {
-				rows.push(row);
+			for (const row of renderRichDiff(diffText, contentWidth, { language })) {
+				rows.push(`${indent}${row}`);
 			}
 		});
 
-		const counts = `${theme.fg("toolDiffAdded", `+${added}`)} ${theme.fg("toolDiffRemoved", `-${removed}`)}`;
 		const displayPath = displayEditPath(path, this.state.cwd);
-		// Truncate the path (not the counts) so it can't push the header past width.
-		const fixed = visibleWidth(marker) + 1 + 2 + visibleWidth(counts);
-		const shownPath = truncateToWidth(displayPath, Math.max(1, width - 1 - fixed), "…");
-		this.addPlain(lines, `${marker} ${shownPath}  ${counts}`);
+		const hint = showHint && this.state.showExpandHint !== false ? this.state.editDiffsExpanded === true : undefined;
+		lines.push(formatFileChangeSummaryLine(displayPath, { added, removed }, hint, width));
 
 		for (const row of rows) {
 			lines.push(row);

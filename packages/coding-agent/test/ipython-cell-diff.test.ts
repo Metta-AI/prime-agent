@@ -118,29 +118,34 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(diffRows.some(hasBackground)).toBe(true);
 	});
 
-	it("prefixes the header with the cell's status marker and aligns it with the summary line", () => {
-		const done = renderCell({
+	it("always shows the summary line and indents diff rows to its text column", () => {
+		const state = {
 			code: "await edit(...)",
 			details: { status: "ok", diffs: [{ path: "a.ts", oldStr: "x", newStr: "X", startLine: 1 }] },
 			executionStarted: true,
 			argsComplete: true,
-			expanded: true,
-			editDiffsExpanded: true,
-		}).split("\n");
-		// Summary line and header share the same single-space indent.
-		expect(done[0]).toMatch(/^ ✓ python/);
-		expect(done.find((l) => l.includes("a.ts"))).toMatch(/^ ✓ a\.ts/);
+			expanded: false,
+		};
 
-		const failed = renderCell({
-			code: "await edit(...)",
-			details: { status: "error", diffs: [{ path: "a.ts", oldStr: "x", newStr: "X", startLine: 1 }] },
-			executionStarted: true,
-			argsComplete: true,
-			expanded: true,
-			editDiffsExpanded: true,
-			isError: true,
-		});
-		expect(failed).toMatch(/✗ a\.ts/);
+		const hidden = renderCell({ ...state, editDiffsExpanded: false }).split("\n");
+		const hiddenSummary = hidden.find((l) => l.includes("╰─ a.ts"));
+		expect(hiddenSummary).toMatch(/^ {4}╰─ a\.ts \+1 -1 · .*to expand\)$/);
+		expect(hidden.some((l) => /1 - .*x/.test(l))).toBe(false);
+
+		const shown = renderCell({ ...state, editDiffsExpanded: true }).split("\n");
+		const summary = shown.find((l) => l.includes("╰─ a.ts"));
+		expect(summary).toMatch(/^ {4}╰─ a\.ts \+1 -1 · .*to collapse\)$/);
+		// Diff rows align with the summary's text column (after the `    ╰─ ` gutter).
+		const textColumn = (summary ?? "").indexOf("a.ts");
+		const removed = shown.find((l) => /1 - .*x/.test(l));
+		const added = shown.find((l) => /1 \+ .*X/.test(l));
+		expect(removed).toBeDefined();
+		expect(added).toBeDefined();
+		for (const row of [removed ?? "", added ?? ""]) {
+			expect(row.startsWith(" ".repeat(textColumn))).toBe(true);
+		}
+		// Toggling only adds the diff rows underneath; the summary line is stable.
+		expect(shown.filter((l) => !/\d+ [-+ ] /.test(l) && !l.includes("⋮")).length).toBe(hidden.length);
 	});
 
 	it("renders an edit path relative to the session cwd, or absolute when outside it", () => {
@@ -191,7 +196,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(lines.filter((line) => /arg\d/.test(stripAnsi(line))).length).toBeGreaterThan(1);
 	});
 
-	it("truncates a long header path so it never overflows the width, keeping the counts", () => {
+	it("truncates a long summary path so it never overflows the width, keeping the counts", () => {
 		const width = 40;
 		const longPath = `src/${"very-long-directory-name/".repeat(8)}file.ts`;
 		const lines = new IPythonCellComponent({
@@ -203,10 +208,10 @@ describe("IPythonCellComponent diff rendering", () => {
 			editDiffsExpanded: true,
 		}).render(width);
 		expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-		const header = lines.map(stripAnsi).find((line) => line.includes("…"));
-		expect(header).toBeDefined();
-		// The +/- counts survive truncation; only the path is shortened.
-		expect(header).toMatch(/\+1 -1\s*$/);
+		const summary = lines.map(stripAnsi).find((line) => line.includes("…"));
+		expect(summary).toBeDefined();
+		// The +/- counts and hint survive truncation; only the path is shortened.
+		expect(summary).toMatch(/\+1 -1 · /);
 	});
 
 	it("renders a large diff without spreading the row array (no RangeError)", () => {
@@ -256,7 +261,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(out.findIndex((line) => line.includes("a.ts"))).toBeGreaterThan(2);
 	});
 
-	it("shows the full diff when collapsed", () => {
+	it("keeps the summary line but hides diff rows when edit diffs are collapsed", () => {
 		const collapsed = renderCell({
 			code: "await edit(...)",
 			details: { status: "ok", diffs: [{ path: "big.py", oldStr: "old", newStr: "NEW", startLine: 1 }] },
@@ -264,8 +269,8 @@ describe("IPythonCellComponent diff rendering", () => {
 			argsComplete: true,
 			expanded: false,
 		});
+		expect(collapsed).toContain("╰─ big.py +1 -1");
 		expect(collapsed).toContain("to expand");
-		expect(collapsed).not.toContain("big.py");
 		expect(collapsed).not.toContain("old");
 		expect(collapsed).not.toContain("NEW");
 	});
@@ -286,7 +291,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(expanded).toContain("a.py");
 		const expandedLines = expanded.split("\n");
 		expect(expandedLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
-			expandedLines.findIndex((line) => /✓ a\.py\s+\+1 -1/.test(line)),
+			expandedLines.findIndex((line) => /╰─ a\.py \+1 -1/.test(line)),
 		);
 	});
 
