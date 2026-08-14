@@ -824,6 +824,19 @@ describe("daemon mode helpers", () => {
 			expect(listed).toContainEqual(
 				expect.objectContaining({ sessionFile: childState.runtime.session.sessionFile, rlmChildId: "child-1" }),
 			);
+			// The registry is legacy read-only now: spawn and completion must land
+			// in the per-child display file, never in rlm-subagents.jsonl.
+			expect(existsSync(join(parentManager.getSessionArtifactDir()!, "rlm-subagents.jsonl"))).toBe(false);
+			const display = JSON.parse(readFileSync(join(childSessionDir, "rlm-subagent.json"), "utf8")) as Record<
+				string,
+				unknown
+			>;
+			expect(display).toMatchObject({
+				childId: "child-1",
+				sessionName: "real-worker",
+				status: "completed",
+				prompt: "complete and persist",
+			});
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
@@ -5379,6 +5392,89 @@ describe("daemon mode helpers", () => {
 		}
 	});
 
+	it("prefers the per-child display file over the legacy registry for passive metadata", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-display-over-registry-"));
+		try {
+			const fixture = makePersistedRlmDaemonFixture(tempDir);
+			// A post-consolidation write: the display file is fresher than the
+			// stale pre-ledger registry entry left behind by an old daemon.
+			writeFileSync(
+				join(fixture.childSessionDir, "rlm-subagent.json"),
+				`${JSON.stringify({
+					type: "rlm_subagent",
+					childId: fixture.childId,
+					sessionName: "renamed-worker",
+					sessionDir: fixture.childSessionDir,
+					sessionFile: fixture.childSessionFile,
+					rlmMaxDepth: 6,
+					rlmParentNodeId: fixture.childId,
+					prompt: "fresher prompt",
+					status: "completed",
+					createdAt: 3,
+					updatedAt: "2026-01-02T00:00:00.000Z",
+				})}\n`,
+			);
+			const internals = fixture.daemon as unknown as {
+				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
+				listPassiveRlmSubagents(): Promise<
+					Array<{ entry: { childId: string; prompt?: string; rlmMaxDepth?: number } }>
+				>;
+			};
+			await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
+
+			const passive = (await internals.listPassiveRlmSubagents()).find(
+				({ entry }) => entry.childId === fixture.childId,
+			);
+			expect(passive?.entry).toMatchObject({ prompt: "fresher prompt", rlmMaxDepth: 6 });
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("falls back to the legacy registry for a pre-ledger child without a display file", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-legacy-metadata-fallback-"));
+		try {
+			// The fixture writes registries exactly as the pre-consolidation daemon
+			// did and no display files: the pure migration state.
+			const fixture = makePersistedRlmDaemonFixture(tempDir);
+			const registryPath = join(fixture.parentArtifactDir, "rlm-subagents.jsonl");
+			const registryEntry = JSON.parse(readFileSync(registryPath, "utf8").trim()) as Record<string, unknown>;
+			registryEntry.prompt = "legacy prompt";
+			registryEntry.spawnCode = "await rlm('legacy prompt')";
+			registryEntry.model = { provider: "test", modelId: "legacy-model" };
+			writeFileSync(registryPath, `${JSON.stringify(registryEntry)}\n`);
+			const internals = fixture.daemon as unknown as {
+				createRuntime(command: Extract<DaemonCommand, { type: "create" }>): Promise<ActiveSessionState>;
+				listPassiveRlmSubagents(): Promise<
+					Array<{
+						entry: {
+							childId: string;
+							prompt?: string;
+							spawnCode?: string;
+							model?: { provider: string; modelId: string };
+							rlmMaxDepth?: number;
+							status: string;
+						};
+					}>
+				>;
+			};
+			await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
+
+			const passive = (await internals.listPassiveRlmSubagents()).find(
+				({ entry }) => entry.childId === fixture.childId,
+			);
+			expect(passive?.entry).toMatchObject({
+				prompt: "legacy prompt",
+				spawnCode: "await rlm('legacy prompt')",
+				model: { provider: "test", modelId: "legacy-model" },
+				rlmMaxDepth: 4,
+				status: "completed",
+			});
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("ignores a crashed registry tail and protects a nested cycle back to the root", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-lazy-rlm-corrupt-registry-"));
 		try {
@@ -5663,7 +5759,7 @@ describe("daemon mode helpers", () => {
 		}
 	});
 
-	it("rehydrates completed children without rewriting their completed registry entry", async () => {
+	it("rehydrates completed children without rewriting their persisted completion", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "prime-agent-daemon-idempotent-rlm-hydration-"));
 		try {
 			const fixture = makePersistedRlmDaemonFixture(tempDir);
@@ -5672,12 +5768,12 @@ describe("daemon mode helpers", () => {
 				createAgentMessageController(
 					getCurrentState: () => ActiveSessionState | undefined,
 				): AgentSessionMessageController;
-				recordRlmSubagentRegistryEntry: ReturnType<typeof vi.fn>;
+				recordRlmSubagentState: ReturnType<typeof vi.fn>;
 			};
 			const parentState = await internals.createRuntime({ type: "create", sessionPath: fixture.parentSessionFile });
 			const registryPath = join(fixture.parentArtifactDir, "rlm-subagents.jsonl");
 			const before = readFileSync(registryPath, "utf8");
-			internals.recordRlmSubagentRegistryEntry = vi.fn(() => false);
+			internals.recordRlmSubagentState = vi.fn(() => false);
 
 			await expect(
 				internals
@@ -5685,8 +5781,9 @@ describe("daemon mode helpers", () => {
 					.sendAgentMessage({ target: "renamed-worker", message: "report progress" }),
 			).resolves.toMatchObject({ deliveryStatus: "delivered" });
 
-			expect(internals.recordRlmSubagentRegistryEntry).not.toHaveBeenCalled();
+			expect(internals.recordRlmSubagentState).not.toHaveBeenCalled();
 			expect(readFileSync(registryPath, "utf8")).toBe(before);
+			expect(existsSync(join(fixture.childSessionDir, "rlm-subagent.json"))).toBe(false);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
