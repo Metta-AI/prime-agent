@@ -259,7 +259,7 @@ function buildEditCallComponent(
 	component.clear();
 	const canExpand = component.preview !== undefined && !("error" in component.preview);
 	const expandHint =
-		canExpand && showExpandHint ? `${theme.fg("dim", " · ")}${expandCollapseHint("app.tools.expand", expanded)}` : "";
+		canExpand && showExpandHint ? `${theme.fg("dim", " · ")}${expandCollapseHint("app.edits.expand", expanded)}` : "";
 	component.addChild(new Text(`${formatEditCall(args, theme)}${expandHint}`, 0, 0));
 
 	const body =

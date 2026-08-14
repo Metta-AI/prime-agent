@@ -446,6 +446,8 @@ describe("ToolExecutionComponent parity", () => {
 		const collapsed = stripAnsi(component.render(120).join("\n"));
 		expect(collapsed).not.toContain("-1 before");
 		expect(collapsed).toContain("+1 -1");
+		// The collapsed `╰─ path +N -M` summary line carries the ctrl+j hint.
+		expect(collapsed.split("\n").find((line) => line.includes("╰─"))).toContain("to expand");
 
 		component.setEditDiffsExpanded(true);
 		const withDiffs = stripAnsi(component.render(120).join("\n"));
@@ -725,14 +727,19 @@ describe("ToolExecutionComponent parity", () => {
 		expect(collapsed).not.toMatch(/1 - before/);
 		expect(collapsed).not.toMatch(/1 \+ after/);
 
+		// Tool expansion shows the full source but never the diff; that belongs to ctrl+j.
 		component.setExpanded(true);
 		const expanded = stripAnsi(component.render(120).join("\n"));
 		expect(expanded).toContain('hidden_side_effect = "only in full source"');
-		expect(expanded).toContain("before");
-		expect(expanded).toContain("after");
-		const expandedLines = expanded.split("\n");
-		expect(expandedLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
-			expandedLines.findIndex((line) => /✓ README\.md\s+\+1 -1/.test(line)),
+		expect(expanded).toContain("╰─ README.md +1 -1");
+		expect(expanded).not.toMatch(/1 - before/);
+
+		component.setEditDiffsExpanded(true);
+		const withDiffs = stripAnsi(component.render(120).join("\n"));
+		const withDiffLines = withDiffs.split("\n");
+		expect(withDiffLines.findIndex((line) => line.includes("hidden_side_effect ="))).toBeLessThan(
+			withDiffLines.findIndex((line) => /✓ README\.md\s+\+1 -1/.test(line)),
 		);
+		expect(withDiffs).not.toContain("╰─ README.md +1 -1");
 	});
 });

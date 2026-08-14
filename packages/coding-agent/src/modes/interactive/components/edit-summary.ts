@@ -8,6 +8,7 @@ import type { IpythonToolDetails } from "../../../core/tools/ipython.js";
 import { resolveToCwd } from "../../../core/tools/path-utils.js";
 import { canonicalizePath, formatPathRelativeToCwdOrAbsolute } from "../../../utils/paths.js";
 import { theme } from "../theme/theme.js";
+import { expandCollapseHint } from "./keybinding-hints.js";
 
 export interface FileChangeSummary {
 	path: string;
@@ -94,13 +95,18 @@ export class FileChangeSummaryComponent implements Component {
 	constructor(
 		private readonly changes: readonly FileChangeSummary[],
 		private readonly cwd: string,
+		private readonly diffsExpanded?: boolean,
 	) {}
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
 		const prefix = theme.fg("dim", "    ╰─ ");
-		return this.changes.map((change) => {
-			const suffix = `${theme.fg("dim", " ")}${counts(change)}`;
+		const hint =
+			this.diffsExpanded === undefined
+				? ""
+				: `${theme.fg("dim", " · ")}${expandCollapseHint("app.edits.expand", this.diffsExpanded)}`;
+		return this.changes.map((change, index) => {
+			const suffix = `${theme.fg("dim", " ")}${counts(change)}${index === this.changes.length - 1 ? hint : ""}`;
 			const available = Math.max(1, safeWidth - visibleWidth(prefix) - visibleWidth(suffix));
 			const path = truncateToWidth(formatFileChangePath(change.path, this.cwd), available, "…");
 			return truncateToWidth(`${prefix}${theme.fg("muted", path)}${suffix}`, safeWidth, "");

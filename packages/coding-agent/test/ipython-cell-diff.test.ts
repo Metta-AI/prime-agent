@@ -51,6 +51,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		});
 
 		// Header carries the path (no "edit" label) and the +/- line counts.
@@ -93,7 +94,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		expect(collapsed).not.toMatch(/11 \+ .*GAMMA/);
 
 		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: false });
-		expect(expanded).toMatch(/11 - .*gamma/);
+		expect(expanded).not.toMatch(/11 - .*gamma/);
 		expect(expanded).toContain('print("edit-done-marker")');
 	});
 
@@ -108,6 +109,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).render(width);
 		const diffRows = lines.filter((line) => /alpha|gamma|GAMMA/.test(stripAnsi(line)));
 		expect(diffRows.length).toBeGreaterThan(0);
@@ -123,6 +125,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).split("\n");
 		// Summary line and header share the same single-space indent.
 		expect(done[0]).toMatch(/^ ✓ python/);
@@ -134,6 +137,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 			isError: true,
 		});
 		expect(failed).toMatch(/✗ a\.ts/);
@@ -148,6 +152,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		});
 		expect(inside).toContain("src/app.ts");
 		expect(inside).not.toContain(`${cwd}/src/app.ts`);
@@ -159,6 +164,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		});
 		expect(outside).toContain("/etc/hosts");
 	});
@@ -172,6 +178,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).render(width);
 
 		// No rendered row may exceed the terminal width (the TUI throws if one does).
@@ -193,6 +200,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).render(width);
 		expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
 		const header = lines.map(stripAnsi).find((line) => line.includes("…"));
@@ -212,6 +220,7 @@ describe("IPythonCellComponent diff rendering", () => {
 				executionStarted: true,
 				argsComplete: true,
 				expanded: true,
+				editDiffsExpanded: true,
 			}).render(80),
 		).not.toThrow();
 	});
@@ -224,6 +233,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).split("\n");
 		const addedRows = out.filter((line) => /arg\d/.test(line));
 		expect(addedRows.length).toBeGreaterThan(1);
@@ -238,6 +248,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		}).split("\n");
 		expect(out[0]).toContain("to collapse");
 		expect(out[1].trim()).toBe("");
@@ -267,7 +278,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			argsComplete: true,
 		};
 		const collapsed = renderCell({ ...state, expanded: false });
-		const expanded = renderCell({ ...state, expanded: true });
+		const expanded = renderCell({ ...state, expanded: true, editDiffsExpanded: true });
 
 		expect(collapsed).not.toContain("hidden_side_effect");
 		expect(collapsed).toContain("a.py");
@@ -297,6 +308,7 @@ describe("IPythonCellComponent diff rendering", () => {
 		const out = renderCell({
 			code: "await edit(...); await edit(...); await edit(...)",
 			expanded: true,
+			editDiffsExpanded: true,
 			details: {
 				status: "ok",
 				diffs: [
@@ -350,6 +362,7 @@ describe("IPythonCellComponent diff rendering", () => {
 			executionStarted: true,
 			argsComplete: true,
 			expanded: true,
+			editDiffsExpanded: true,
 		});
 		expect(out).toContain("a.ts");
 		expect(out).not.toContain("no output");

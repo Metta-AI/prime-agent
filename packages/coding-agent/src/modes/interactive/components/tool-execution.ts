@@ -183,10 +183,6 @@ export class ToolExecutionComponent extends Container {
 		);
 	}
 
-	private effectiveExpanded(): boolean {
-		return this.expanded || (this.editDiffsExpanded && this.isBuiltInEditTool());
-	}
-
 	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
 		return {
 			args: this.args,
@@ -201,7 +197,7 @@ export class ToolExecutionComponent extends Container {
 			executionStarted: this.executionStarted,
 			argsComplete: this.argsComplete,
 			isPartial: this.isPartial,
-			expanded: this.effectiveExpanded(),
+			expanded: this.isBuiltInEditTool() ? this.editDiffsExpanded : this.expanded,
 			showExpandHint: this.showExpandHint,
 			showImages: this.showImages,
 			includeImageDimensions: this.includeImageDimensions,
@@ -419,11 +415,17 @@ export class ToolExecutionComponent extends Container {
 			}
 		}
 
-		if (!this.effectiveExpanded() && this.result && (this.isBuiltInEditTool() || this.shouldUseIpythonRenderer())) {
+		if (!this.editDiffsExpanded && this.result && (this.isBuiltInEditTool() || this.shouldUseIpythonRenderer())) {
 			const changes = getToolFileChanges(this.toolName, this.args, this.result, this.cwd);
 			if (changes.length > 0) {
 				const container = this.usesSelfRenderShell() ? this.selfRenderContainer : this.contentPanel;
-				container.addChild(new FileChangeSummaryComponent(changes, this.cwd));
+				container.addChild(
+					new FileChangeSummaryComponent(
+						changes,
+						this.cwd,
+						this.showExpandHint ? this.editDiffsExpanded : undefined,
+					),
+				);
 				hasContent = true;
 			}
 		}
