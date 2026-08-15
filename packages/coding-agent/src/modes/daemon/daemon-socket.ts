@@ -212,8 +212,21 @@ function assertSocketLease(socketPath: string, lease: DaemonSocketPathLease): vo
 }
 
 export function defaultDaemonSocketDir(): string {
+	// AF_UNIX sun_path caps socket paths at ~104 bytes on macOS (108 on Linux).
+	// Worker sockets add `worker-<12>-<12>.sock` (30 chars) to this dir, so the
+	// dir itself must stay short. macOS tmpdir() is /var/folders/.../T (~50
+	// chars already, and TMPDIR under nix-shell is far longer), which pushes
+	// worker socket binds past the cap and the daemon dies with EINVAL. Use a
+	// fixed short base on darwin — the same /tmp shape Linux already gets from
+	// tmpdir() — and honor PRIME_AGENT_SOCKET_DIR for anyone who needs to move
+	// the whole socket/registry tree elsewhere.
+	const override = process.env.PRIME_AGENT_SOCKET_DIR;
+	if (override) {
+		return override;
+	}
 	const suffix = typeof process.getuid === "function" ? String(process.getuid()) : "user";
-	return join(tmpdir(), `prime-agent-${suffix}`);
+	const base = process.platform === "darwin" ? "/tmp" : tmpdir();
+	return join(base, `prime-agent-${suffix}`);
 }
 
 function ensureDefaultDaemonSocketDir(socketPath: string): void {
