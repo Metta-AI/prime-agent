@@ -164,6 +164,13 @@ export interface KernelManagerOptions {
 	snapshot?: KernelSnapshotConfig;
 	/** Default: "prime-agent". */
 	username?: string;
+	/**
+	 * Skip the forkserver fast path and always `python -m ipykernel_launcher`.
+	 * Used to retry a boot after a forked kernel wedged during restore/bootstrap
+	 * (fork-without-exec can deadlock the child when the template process was
+	 * mid-lock at fork time — rare, load-dependent, and unrecoverable in-kernel).
+	 */
+	forceDirectSpawn?: boolean;
 }
 
 export interface KernelStartOptions {
@@ -587,7 +594,7 @@ function installSignalHandlersOnce(): void {
 export class KernelManager {
 	private readonly options: Pick<
 		KernelManagerOptions,
-		"python" | "cwd" | "env" | "sessionId" | "hostHandlers" | "pythonSkills" | "snapshot"
+		"python" | "cwd" | "env" | "sessionId" | "hostHandlers" | "pythonSkills" | "snapshot" | "forceDirectSpawn"
 	> &
 		Required<Pick<KernelManagerOptions, "username">>;
 	private readonly session = uuid();
@@ -632,11 +639,17 @@ export class KernelManager {
 			pythonSkills: options.pythonSkills,
 			snapshot: options.snapshot,
 			username: options.username ?? "prime-agent",
+			forceDirectSpawn: options.forceDirectSpawn,
 		};
 	}
 
 	get ownerSessionId(): string | undefined {
 		return this.options.sessionId;
+	}
+
+	/** True when the running kernel came from the forkserver fast path. */
+	get wasForked(): boolean {
+		return this.kernelPid !== undefined;
 	}
 
 	private appendKernelDiagnostic(message: string): void {
@@ -690,7 +703,7 @@ export class KernelManager {
 		// (disabled, unavailable, fork error) degrades to the direct-spawn path so
 		// correctness never depends on fork.
 		let forked = false;
-		if (isForkServerEnabled()) {
+		if (!this.options.forceDirectSpawn && isForkServerEnabled()) {
 			try {
 				this.kernelPid = await forkKernel(python, {
 					connectionPath: connection.path,

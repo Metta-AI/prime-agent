@@ -164,6 +164,38 @@ function createAbortError(): Error {
 	return new Error("IPython execution aborted");
 }
 
+const KERNEL_BOOT_PHASE_DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * Deadline on the post-spawn boot phases (state restore + rlm bootstrap). Both
+ * are execute()s against a kernel that may never answer — a forked kernel can
+ * inherit a held lock from its template and deadlock before running a single
+ * cell — and an unbounded execute there hangs the whole session forever.
+ * PRIME_AGENT_KERNEL_BOOT_TIMEOUT_MS overrides; 0 disables the bound.
+ */
+function kernelBootPhaseTimeoutMs(): number {
+	const raw = process.env.PRIME_AGENT_KERNEL_BOOT_TIMEOUT_MS;
+	if (raw === undefined || raw === "") {
+		return KERNEL_BOOT_PHASE_DEFAULT_TIMEOUT_MS;
+	}
+	const parsed = Number(raw);
+	return Number.isInteger(parsed) && parsed >= 0 ? parsed : KERNEL_BOOT_PHASE_DEFAULT_TIMEOUT_MS;
+}
+
+class KernelBootPhaseTimeoutError extends Error {
+	constructor(
+		readonly wasForked: boolean,
+		phase: string,
+		timeoutMs: number,
+	) {
+		super(
+			`IPython kernel did not finish ${phase} within ${timeoutMs}ms${wasForked ? " (forked kernel)" : ""}. ` +
+				"The kernel process was disposed.",
+		);
+		this.name = "KernelBootPhaseTimeoutError";
+	}
+}
+
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, onAbort?: () => void): Promise<T> {
 	if (!signal) {
 		return promise;
@@ -474,6 +506,27 @@ export class IpythonKernelProvisioner {
 					startupSignal,
 				);
 			}
+			try {
+				return await this.bootKernel(startupSignal, false);
+			} catch (error) {
+				// A forked kernel can wedge inside restore/bootstrap (fork-without-exec
+				// deadlocks the child when the template forked mid-lock — rare and
+				// load-dependent). The wedge is unrecoverable in that kernel, but not
+				// in a fresh one: retry once on the direct-spawn path, which shares
+				// nothing with the template process.
+				if (error instanceof KernelBootPhaseTimeoutError && error.wasForked && !startupSignal.aborted) {
+					this.emitStartupProgress("IPython kernel wedged during startup; retrying with a direct spawn...");
+					return await this.bootKernel(startupSignal, true);
+				}
+				throw error;
+			}
+		} finally {
+			startupAbort.cleanup();
+		}
+	}
+
+	private async bootKernel(startupSignal: AbortSignal, forceDirectSpawn: boolean): Promise<KernelManager> {
+		{
 			const snapshotDir = this.options?.snapshotDir;
 			const m = new KernelManager({
 				python: this.options?.python,
@@ -486,7 +539,39 @@ export class IpythonKernelProvisioner {
 				snapshot: snapshotDir
 					? { path: snapshotPathIn(snapshotDir), manifestPath: manifestPathIn(snapshotDir) }
 					: undefined,
+				forceDirectSpawn,
 			});
+			// Restore and bootstrap are execute()s on a kernel that may never answer
+			// (the wedged-boot case above); the deadline turns that from an infinite
+			// hang of the whole session into a diagnosable failure the caller can
+			// retry. 0 disables the bound.
+			const bootPhaseTimeoutMs = kernelBootPhaseTimeoutMs();
+			const bounded = async <T>(phase: string, run: () => Promise<T>): Promise<T> => {
+				if (bootPhaseTimeoutMs === 0) {
+					return run();
+				}
+				let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+				const wedged = new Promise<never>((_, reject) => {
+					timer = globalThis.setTimeout(
+						() => reject(new KernelBootPhaseTimeoutError(m.wasForked, phase, bootPhaseTimeoutMs)),
+						bootPhaseTimeoutMs,
+					);
+					if (timer && typeof timer === "object" && "unref" in timer) {
+						timer.unref();
+					}
+				});
+				const work = run();
+				// The losing execute settles (or rejects) after the dispose below;
+				// observe it here so the late rejection can't surface as unhandled.
+				work.catch(() => {});
+				try {
+					return await Promise.race([work, wedged]);
+				} finally {
+					if (timer) {
+						globalThis.clearTimeout(timer);
+					}
+				}
+			};
 			let pendingRestore: RestoreResult | undefined;
 			try {
 				// Emitted synchronously (before the permit await) so a listener attaching
@@ -510,15 +595,17 @@ export class IpythonKernelProvisioner {
 				if (snapshotDir) {
 					const snapshotExisted = existsSync(snapshotPathIn(snapshotDir));
 					this.emitStartupProgress("Restoring IPython state...");
-					const restore = await raceWithAbort(m.restoreState(), startupSignal);
+					const restore = await bounded("state restore", () => raceWithAbort(m.restoreState(), startupSignal));
 					if (snapshotExisted) {
 						pendingRestore = restore ?? { restored: [], failed: [], path: snapshotPathIn(snapshotDir) };
 					}
 				}
 				this.emitStartupProgress("Preparing IPython runtime...");
-				const bootstrap = await m.execute(buildRlmBootstrapCode(this.options?.pythonSkills), {
-					signal: startupSignal,
-				});
+				const bootstrap = await bounded("the rlm bootstrap", () =>
+					m.execute(buildRlmBootstrapCode(this.options?.pythonSkills), {
+						signal: startupSignal,
+					}),
+				);
 				if (bootstrap.status !== "ok") {
 					const details = [bootstrap.stderr, bootstrap.error?.traceback.join("\n")].filter(Boolean).join("\n");
 					throw new Error(`Failed to initialize rlm runtime in the IPython kernel:\n${details}`);
@@ -538,8 +625,6 @@ export class IpythonKernelProvisioner {
 				this.options.kernelManagerRef.current = m;
 			}
 			return m;
-		} finally {
-			startupAbort.cleanup();
 		}
 	}
 }
