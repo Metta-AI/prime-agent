@@ -143,6 +143,7 @@ export interface Settings {
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	quietStartup?: boolean;
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
+	rlmRunCommand?: string; // External subagent runner: rlm() children run as this command instead of in-process sessions (see rlm-external-runner.ts)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	mcpServers?: Record<string, McpServerConfig>; // User-declared MCP servers (name → config); built-ins are in the ai/mcp catalog
 	packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
@@ -975,6 +976,20 @@ export class SettingsManager {
 		this.globalSettings.shellCommandPrefix = prefix;
 		this.markModified("shellCommandPrefix");
 		this.save();
+	}
+
+	/**
+	 * The external rlm() runner, when one is configured: a command that owns
+	 * a subagent's whole run (PRIME_AGENT_RLM_RUN_COMMAND overrides the
+	 * setting; an empty value disables). See rlm-external-runner.ts.
+	 */
+	getRlmRunCommand(): string | undefined {
+		const fromEnv = process.env.PRIME_AGENT_RLM_RUN_COMMAND;
+		if (fromEnv !== undefined) {
+			return fromEnv.trim() || undefined;
+		}
+		const configured = this.settings.rlmRunCommand?.trim();
+		return configured || undefined;
 	}
 
 	getNpmCommand(): string[] | undefined {

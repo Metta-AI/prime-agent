@@ -62,9 +62,12 @@ import {
 	type AgentSessionMessageController,
 	type AgentSessionMessageListResult,
 	type AgentSessionMessageReceipt,
+	AGENT_MESSAGE_SOURCE,
 	assertAgentSessionNameAvailable,
 	assertDirectAgentMessageTarget,
 	createAgentMessageHostHandlers,
+	createAgentSessionMessage,
+	createAgentSessionMessageId,
 	formatAgentSessionNameUnavailable,
 	isAgentSessionMessage,
 	normalizeAgentSessionMessage,
@@ -214,6 +217,7 @@ import {
 } from "./refinement/index.js";
 import { resolveConfigValue } from "./resolve-config-value.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
+import { type ExternalRlmRunRequest, startExternalRlmChild } from "./rlm-external-runner.js";
 import {
 	type CreateRlmSubagentRuntimeOptions,
 	createDefaultRlmSubagentSessionName,
@@ -9807,10 +9811,115 @@ export class AgentSession {
 			}).catch(() => undefined);
 		};
 
+		// An external runner (settings.rlmRunCommand — rlm-external-runner.ts)
+		// owns the whole child run when configured: no in-process session, no
+		// kernel; the runner's `done` answer reaches the parent as an agent
+		// message from the child. A runner that declines (exit 75 before any
+		// event) hands the child back to the in-process path untouched.
+		const runExternal = async (command: string): Promise<boolean> => {
+			const request: ExternalRlmRunRequest = {
+				protocol: 1,
+				prompt,
+				childId: childNodeId,
+				sessionName,
+				sessionDir: childSessionDir,
+				model: `${modelSelection.model.provider}/${modelSelection.model.id}`,
+				parentSessionId: this.sessionId,
+				parentSessionName: this.sessionName,
+				parentSessionDir: this._ensureRlmSessionDir(),
+				cwd: this._cwd,
+				rlmDepth: this._rlmDepth + 1,
+				rlmMaxDepth: this._rlmMaxDepth,
+				spawnCode,
+			};
+			const handle = startExternalRlmChild(command, request, {
+				onEvent: (event) => {
+					if (event.event === "status") {
+						const text = compactRlmText(event.text);
+						if (text) {
+							activity = { kind: "executing", toolName: text };
+							emitChildUpdate();
+						}
+					} else if (event.event === "done") {
+						const text = compactRlmText(event.answer);
+						if (text) answerPreview = text;
+					}
+				},
+			});
+			run.abort = () => handle.abort(run.error);
+			if (!(await handle.admitted)) {
+				run.abort = noopRlmChildAbort;
+				return false;
+			}
+			try {
+				throwIfCancelled();
+				run.status = "running";
+				activity = { kind: "waiting" };
+				emitChildUpdate();
+				const outcome = await handle.result;
+				if (run.error) throw new Error(run.error);
+				run.status = "done";
+				durationMs = Date.now() - startedAt;
+				activity = undefined;
+				const preview = compactRlmText(outcome.answer);
+				if (preview) answerPreview = preview;
+				emitChildUpdate();
+				if (!run.detachedDeletion) {
+					const reply = createAgentSessionMessage({
+						id: createAgentSessionMessageId(),
+						source: AGENT_MESSAGE_SOURCE,
+						message: normalizeAgentSessionMessage(outcome.answer || "(no answer)"),
+						from: { sessionId: run.id, sessionName },
+						fromRelationship: "child",
+						target: {
+							activeSessionId: (await this._currentActiveSessionId()) ?? this.sessionId,
+							sessionId: this.sessionId,
+							sessionName: this.sessionName,
+						},
+					});
+					await deliverTerminalMessageToParent(reply);
+				}
+			} catch (error) {
+				const runError = error instanceof Error ? error : new Error(String(error));
+				run.publication.reject(runError);
+				if (run.status !== "cancelled") {
+					run.status = "error";
+					run.error = runError.message;
+				}
+				durationMs = Date.now() - startedAt;
+				activity = undefined;
+				emitChildUpdate();
+				if (!run.detachedDeletion) {
+					await deliverTerminalMessageToParent(
+						run.status === "cancelled"
+							? createRlmChildTerminalNoticeMessage({
+									kind: "cancelled",
+									childId: run.id,
+									sessionName,
+									reason: run.error,
+								})
+							: createRlmChildFailureMessage({
+									childId: run.id,
+									sessionName,
+									error: run.error ?? "unknown error",
+								}),
+					);
+				}
+				if (run.status === "cancelled" && !this._disposed && !this._disposing) {
+					this._deletedRlmChildIds.add(run.id);
+					this._removeRlmSubagentTracking(run.id);
+				}
+			} finally {
+				run.abort = noopRlmChildAbort;
+				run.settled = true;
+			}
+			return true;
+		};
+
 		// Runtime startup and the task run are deliberately detached. The public
 		// spawn resolves at admission, while this task owns live tracking, usage,
 		// retention, cancellation, and late-startup cleanup.
-		void (async () => {
+		const runInline = async () => {
 			let childRuntime: RlmSubagentRuntime | undefined;
 			try {
 				childRuntime = await this._createRlmSubagentRuntime(subagentOptions);
@@ -10022,6 +10131,11 @@ export class AgentSession {
 				}
 				run.settled = true;
 			}
+		};
+		const externalRunner = this.settingsManager.getRlmRunCommand();
+		void (async () => {
+			if (externalRunner && (await runExternal(externalRunner))) return;
+			await runInline();
 		})().catch(() => undefined);
 
 		return {
