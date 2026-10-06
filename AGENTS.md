@@ -80,11 +80,11 @@ When closing issues via commit:
 To test Prime Agent's TUI in a controlled terminal environment:
 
 ```bash
-# Create tmux session with specific dimensions
-tmux new-session -d -s prime-agent-test -x 80 -y 24
+# Run from the repository root; create a session with specific dimensions
+tmux new-session -d -s prime-agent-test -x 80 -y 24 -c "$PWD"
 
 # Start Prime Agent from source
-tmux send-keys -t prime-agent-test "cd /Users/kevin/pi/prime-agent && ./prime-agent.sh" Enter
+tmux send-keys -t prime-agent-test "./prime-agent.sh" Enter
 
 # Wait for startup, then capture output
 sleep 3 && tmux capture-pane -t prime-agent-test -p
